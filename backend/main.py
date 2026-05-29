@@ -17,31 +17,9 @@ try:
 except ImportError:
     from region_parser import extract_region
 
-HEATMAP_IMPORT_ERROR = ""
-HEATMAP_AVAILABLE = True
+HEATMAP_IMPORT_ERROR = "Heatmap feature has been disabled."
+HEATMAP_AVAILABLE = False
 GRADCAM_ENGINE = None
-try:
-    try:
-        from .gradcam import GradCAM
-        from .heatmap import (
-            bgr_image_to_base64_png,
-            decode_upload_to_bgr,
-            apply_heatmap,
-        )
-        from .model import model as heatmap_model, preprocess, target_layer
-    except ImportError:
-        from gradcam import GradCAM
-        from heatmap import (
-            bgr_image_to_base64_png,
-            decode_upload_to_bgr,
-            apply_heatmap,
-        )
-        from model import model as heatmap_model, preprocess, target_layer
-
-    GRADCAM_ENGINE = GradCAM(heatmap_model, target_layer)
-except Exception as heatmap_exc:
-    HEATMAP_AVAILABLE = False
-    HEATMAP_IMPORT_ERROR = str(heatmap_exc)
 
 load_dotenv()
 
@@ -401,54 +379,13 @@ async def analyze(file: UploadFile = File(...), context: str = Form(default=""))
         },
     ]
 
-    def _build_analysis_assets(report_text: str) -> Optional[Dict]:
-        if not HEATMAP_AVAILABLE or GRADCAM_ENGINE is None:
-            return {
-                "meta": {
-                    "type": "analysis_assets_unavailable",
-                    "reason": "gradcam_dependencies_unavailable",
-                    "detail": HEATMAP_IMPORT_ERROR,
-                }
-            }
-
-        if mime_type not in {"image/jpeg", "image/png", "image/webp"}:
-            return None
-
-        regions = extract_region(report_text)
-        if not regions:
-            return {
-                "meta": {
-                    "type": "analysis_assets_unavailable",
-                    "reason": "no_localizable_region",
-                    "detail": "No mappable abnormal location found in report text; heatmap suppressed to avoid false highlighting.",
-                }
-            }
-
-        try:
-            original_img = decode_upload_to_bgr(file_bytes)
-            input_tensor = preprocess(io.BytesIO(file_bytes))
-            cam, class_idx = GRADCAM_ENGINE.generate(input_tensor)
-            heatmap_img = apply_heatmap(original_img, cam, regions=regions)
-            heatmap_b64 = bgr_image_to_base64_png(heatmap_img)
-        except Exception:
-            return None
-
-        return {
-            "meta": {
-                "type": "analysis_assets",
-                "prediction_class": int(class_idx),
-                "regions": regions,
-                "heatmap": f"data:image/png;base64,{heatmap_b64}",
-            }
-        }
-
     return _sse_response(
         _stream_chat_completion(
             client,
             messages,
             model,
             fallback_model,
-            post_payload_builder=_build_analysis_assets,
+            post_payload_builder=None,
         )
     )
 
